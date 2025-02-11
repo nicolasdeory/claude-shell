@@ -11,7 +11,7 @@ https://github.com/user-attachments/assets/645b6296-0969-47ee-938a-e88e9d207c96
 - 🤖 Interactive chat with Claude AI optimized for bash/terminal assistance
 - 💻 Direct command execution from AI responses
 - 📝 Message editing and history navigation
-- 📋 Copy messages to clipboard
+- 📋 Copy messages to clipboard or select text to copy with mouse
 - 🔍 Full conversation history browsing
 - 🎨 Beautiful TUI with color-coded messages and syntax highlighting
 - 🖱️ Mouse support for scrolling
