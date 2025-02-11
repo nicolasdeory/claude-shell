@@ -53,6 +53,9 @@ jobs:
           git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${{ github.repository_owner }}/homebrew-gpt-term.git
           cd homebrew-gpt-term
           
+          # Create Formula directory if it doesn't exist
+          mkdir -p Formula
+          
           # Update formula
           cat > Formula/gpt-term.rb << EOL
           class GptTerm < Formula
