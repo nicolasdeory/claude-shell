@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/google/uuid"
 
+	"flag"
 	"gpt-term/internal/claude"
 	"gpt-term/internal/storage"
 )
@@ -130,6 +131,7 @@ const (
 	downArrow     = "▼"
 	beginningText = "- Beginning of conversation -"
 	endText       = ""
+	version       = "1.0.0"
 )
 
 const systemPrompt = `You are a bash terminal helper AI. Unless the user asks otherwise, you will specify all solutions in bash commands ideally one liners if its simple. Before displaying the bash command code, you must surround it with <command></command> tags. Each <command> block must contain exactly one command - if you need to show multiple commands, use multiple <command> blocks. Do not insert `
@@ -791,7 +793,7 @@ func (m model) statusBarView() string {
 	}
 	switch m.mode {
 	case ModeNormal:
-		return fmt.Sprintf("%s\n%s\n↑/↓: Scroll | Ctrl+J/K: Edit | Ctrl+X/X: Execute | Ctrl+R: History | Ctrl+H: Show full help",
+		return fmt.Sprintf("%s\n%s\n↑/↓: Scroll | Ctrl+J/K: Edit | Ctrl+X/X: Execute | Ctrl+R: History | Ctrl+N: New chat | Ctrl+H: Show full help",
 			m.textInput.View(), status)
 	case ModeEditing:
 		return "Press ESC to exit, J/K to navigate messages, Enter to edit message, X to execute command, C to copy message"
@@ -1051,6 +1053,15 @@ func getClipboardCommand() (*exec.Cmd, error) {
 }
 
 func main() {
+	// Add version flag
+	versionFlag := flag.Bool("version", false, "Print version information")
+	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("gpt-term version %s\n", version)
+		os.Exit(0)
+	}
+
 	if os.Getenv("CLAUDE_API_KEY") == "" {
 		fmt.Println("Error: CLAUDE_API_KEY environment variable is not defined")
 		os.Exit(1)

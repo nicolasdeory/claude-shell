@@ -17,7 +17,14 @@ https://github.com/user-attachments/assets/645b6296-0969-47ee-938a-e88e9d207c96
 - 🖱️ Mouse support for scrolling
 - ⌨️ Vim-style navigation in edit mode
 
-## Installation
+## Getting Started
+```bash
+brew tap nicolasdeory/claude-shell
+brew install gpt-term
+CLAUDE_API_KEY=your-api-key-here
+```
+
+## Development Installation
 
 1. Ensure you have Go 1.22 or later installed
 2. Clone the repository:
