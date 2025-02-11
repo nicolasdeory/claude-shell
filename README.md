@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/645b6296-0969-47ee-938a-e88e9d207c96
 
 ## Getting Started
 ```bash
-brew tap nicolasdeory/claude-shell
+brew tap nicolasdeory/gpt-term
 brew install gpt-term
 CLAUDE_API_KEY=your-api-key-here
 ```
