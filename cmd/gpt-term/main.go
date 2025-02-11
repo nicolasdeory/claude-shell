@@ -140,6 +140,7 @@ const helpMessage = `GPT Terminal Help:
 - X: Execute command from selected assistant message
 - Alt+X: Execute command from last assistant message
 - Ctrl+R: Browse conversation history
+- Ctrl+N: Create new chat
 - Ctrl+C: Quit
 - Ctrl+H: Show this help
 
@@ -254,6 +255,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+j", "ctrl+k":
 			m.mode = ModeEditing
 			m.cursorIndex = len(m.messages) - 1
+			m.updateViewport()
+			return m, nil
+		case "ctrl+n":
+			// Create new conversation
+			conv := &storage.Conversation{
+				ID:        uuid.New().String(),
+				CreatedAt: time.Now(),
+				Messages:  make([]storage.Message, 0),
+			}
+			// Add system prompt as hidden message
+			systemMsg := storage.Message{
+				Role:      "system",
+				Content:   systemPrompt,
+				Timestamp: time.Now(),
+			}
+			conv.Messages = append(conv.Messages, systemMsg)
+
+			// Update model with new conversation
+			m.conversation = conv
+			m.messages = conv.Messages
+			m.mode = ModeNormal
 			m.updateViewport()
 			return m, nil
 		}
