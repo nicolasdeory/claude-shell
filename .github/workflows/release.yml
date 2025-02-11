@@ -38,3 +38,52 @@ jobs:
           files: |
             builds/*
           generate_release_notes: true
+
+      - name: Get version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Update Homebrew formula
+        run: |
+          # Get the checksums
+          DARWIN_SHA=$(grep darwin-amd64 builds/checksums.txt | awk '{print $1}')
+          LINUX_SHA=$(grep linux-amd64 builds/checksums.txt | awk '{print $1}')
+          
+          # Clone homebrew repo
+          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${{ github.repository_owner }}/homebrew-gpt-term.git
+          cd homebrew-gpt-term
+          
+          # Update formula
+          cat > Formula/gpt-term.rb << EOL
+          class GptTerm < Formula
+            desc "CLI tool for GPT interactions in the terminal"
+            homepage "https://github.com/${{ github.repository }}"
+            version "${VERSION}"
+            
+            if OS.mac?
+              url "https://github.com/${{ github.repository }}/releases/download/${VERSION}/gpt-term-darwin-amd64"
+              sha256 "${DARWIN_SHA}"
+            elsif OS.linux?
+              url "https://github.com/${{ github.repository }}/releases/download/${VERSION}/gpt-term-linux-amd64"
+              sha256 "${LINUX_SHA}"
+            end
+            
+            def install
+              bin.install "gpt-term-#{OS.mac? ? "darwin" : "linux"}-amd64" => "gpt-term"
+            end
+            
+            test do
+              system "#{bin}/gpt-term", "--version"
+            end
+          end
+          EOL
+          
+          # Commit and push changes
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add Formula/gpt-term.rb
+          git commit -m "Update formula to ${VERSION}"
+          git push
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
