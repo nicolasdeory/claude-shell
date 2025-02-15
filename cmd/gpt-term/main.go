@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -68,6 +69,7 @@ type model struct {
 	commands        [][]string
 	selectedCommand int
 	ready           bool // Add this field to track if window size is set
+	lastLoadedConv  int  // Add this new field
 }
 
 type Mode int
@@ -86,8 +88,11 @@ var (
 	selectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("82")).Foreground(lipgloss.Color("0"))
 	userStyle     = lipgloss.NewStyle().Background(lipgloss.Color("255")).Foreground(lipgloss.Color("0"))
 	systemStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	commandStyle  = lipgloss.NewStyle().Background(lipgloss.Color("82")).Foreground(lipgloss.Color("226"))
-	titleStyle    = lipgloss.NewStyle().
+	commandStyle  = lipgloss.NewStyle().
+			Background(lipgloss.Color("82")).
+			Foreground(lipgloss.Color("0")).
+			Padding(0, 1)
+	titleStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("82")).
 			Foreground(lipgloss.Color("0")).
 			Padding(0, 1).
@@ -127,11 +132,10 @@ var (
 )
 
 const (
-	upArrow       = "▲"
-	downArrow     = "▼"
-	beginningText = "- Beginning of conversation -"
-	endText       = ""
-	version       = "1.0.0"
+	upArrow   = "▲"
+	downArrow = "▼"
+	endText   = ""
+	version   = "1.0.0"
 )
 
 const systemPrompt = `You are a bash terminal helper AI. Unless the user asks otherwise, you will specify all solutions in bash commands ideally one liners if its simple. Before displaying the bash command code, you must surround it with <command></command> tags. Each <command> block must contain exactly one command - if you need to show multiple commands, use multiple <command> blocks. Do not insert `
@@ -142,6 +146,7 @@ const helpMessage = `GPT Terminal Help:
 - X: Execute command from selected assistant message
 - Alt+X: Execute command from last assistant message
 - Ctrl+R: Browse conversation history
+- Ctrl+L: Load latest conversation
 - Ctrl+N: Create new chat
 - Ctrl+C: Quit
 - Ctrl+H: Show this help
@@ -153,7 +158,6 @@ func initialModel() (model, error) {
 	ti.Placeholder = "What do you want to ask?"
 	ti.Focus()
 	ti.CharLimit = 156
-	ti.Width = 50
 
 	store, err := storage.NewStorage()
 	if err != nil {
@@ -184,16 +188,17 @@ func initialModel() (model, error) {
 	conv.Messages = append(conv.Messages, systemMsg)
 
 	return model{
-		textInput:    ti,
-		viewport:     vp,
-		mode:         ModeNormal,
-		conversation: conv,
-		messages:     conv.Messages,
-		storage:      store,
-		client:       claude.NewClient(),
-		spinner:      sp,
-		isLoading:    false,
-		ready:        false,
+		textInput:      ti,
+		viewport:       vp,
+		mode:           ModeNormal,
+		conversation:   conv,
+		messages:       conv.Messages,
+		storage:        store,
+		client:         claude.NewClient(),
+		spinner:        sp,
+		isLoading:      false,
+		ready:          false,
+		lastLoadedConv: -1, // Initialize to -1
 	}, nil
 }
 
@@ -224,27 +229,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.width = msg.Width
 		m.ready = true
-		// Update text input width to be half of the terminal width
-		m.textInput.Width = (m.width - 4) / 2 // Account for margins
+		// Update text input width to use full width (minus margins)
+		m.textInput.Width = m.width - 4 // Account for left and right margins
 		m.updateViewport()
 		return m, nil
 
 	case tea.MouseMsg:
 		switch msg.Type {
 		case tea.MouseWheelUp:
-			if m.mode == ModeEditing {
+			if m.mode == ModeHistory {
+				oldSelected := m.selectedConv
+				m.selectedConv = max(0, m.selectedConv-1)
+				if oldSelected != m.selectedConv {
+					m.ensureConversationVisible(m.selectedConv)
+				}
+				return m, nil
+			} else if m.mode == ModeEditing {
 				m.viewport.LineUp(3)
 			} else {
 				m.viewport.LineUp(3)
 			}
-			return m, nil // Return immediately to prevent updateViewport
+			return m, nil
 		case tea.MouseWheelDown:
-			if m.mode == ModeEditing {
+			if m.mode == ModeHistory {
+				oldSelected := m.selectedConv
+				m.selectedConv = min(len(m.conversations)-1, m.selectedConv+1)
+				if oldSelected != m.selectedConv {
+					m.ensureConversationVisible(m.selectedConv)
+				}
+				return m, nil
+			} else if m.mode == ModeEditing {
 				m.viewport.LineDown(3)
 			} else {
 				m.viewport.LineDown(3)
 			}
-			return m, nil // Return immediately to prevent updateViewport
+			return m, nil
 		}
 
 	case tea.KeyMsg:
@@ -258,6 +277,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = ModeEditing
 			m.cursorIndex = len(m.messages) - 1
 			m.updateViewport()
+			return m, nil
+		case "ctrl+l":
+			// Load conversations
+			conversations, err := m.storage.ListConversations()
+			if err != nil {
+				m.err = err
+				return m, nil
+			}
+
+			if len(conversations) > 0 {
+				// Sort conversations by date
+				sort.Slice(conversations, func(i, j int) bool {
+					return conversations[i].CreatedAt.After(conversations[j].CreatedAt)
+				})
+
+				// Increment lastLoadedConv or wrap around to 0
+				m.lastLoadedConv++
+				if m.lastLoadedConv >= len(conversations) {
+					m.lastLoadedConv = 0
+				}
+
+				// Load the next conversation
+				m.conversation = &conversations[m.lastLoadedConv]
+				m.messages = m.conversation.Messages
+				m.updateViewport()
+				m.viewport.GotoBottom()
+			}
 			return m, nil
 		case "ctrl+n":
 			// Create new conversation
@@ -278,6 +324,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.conversation = conv
 			m.messages = conv.Messages
 			m.mode = ModeNormal
+			m.updateViewport()
+			return m, nil
+		case "ctrl+h":
+			m.mode = ModeHelp
 			m.updateViewport()
 			return m, nil
 		}
@@ -433,18 +483,52 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = ModeNormal
 				m.updateViewport()
 			case tea.KeyUp:
-				if m.selectedConv > 0 {
-					m.selectedConv--
-					m.updateViewport()
+				oldSelected := m.selectedConv
+				m.selectedConv = max(0, m.selectedConv-1)
+				if oldSelected != m.selectedConv {
+					m.ensureConversationVisible(m.selectedConv)
 				}
+				return m, nil
 			case tea.KeyDown:
-				if m.selectedConv < len(m.conversations)-1 {
-					m.selectedConv++
-					m.updateViewport()
+				oldSelected := m.selectedConv
+				m.selectedConv = min(len(m.conversations)-1, m.selectedConv+1)
+				if oldSelected != m.selectedConv {
+					m.ensureConversationVisible(m.selectedConv)
 				}
+				return m, nil
+			case tea.KeyPgUp:
+				oldSelected := m.selectedConv
+				m.selectedConv = max(0, m.selectedConv-m.viewport.Height)
+				if oldSelected != m.selectedConv {
+					m.ensureConversationVisible(m.selectedConv)
+				}
+				return m, nil
+			case tea.KeyPgDown:
+				oldSelected := m.selectedConv
+				m.selectedConv = min(len(m.conversations)-1, m.selectedConv+m.viewport.Height)
+				if oldSelected != m.selectedConv {
+					m.ensureConversationVisible(m.selectedConv)
+				}
+				return m, nil
+			case tea.KeyHome:
+				m.selectedConv = 0
+				m.ensureConversationVisible(m.selectedConv)
+				return m, nil
+			case tea.KeyEnd:
+				m.selectedConv = len(m.conversations) - 1
+				m.ensureConversationVisible(m.selectedConv)
+				return m, nil
 			case tea.KeyEnter:
 				if len(m.conversations) > 0 {
-					m.conversation = &m.conversations[m.selectedConv]
+					// Create sorted copy of conversations
+					sortedConvs := make([]storage.Conversation, len(m.conversations))
+					copy(sortedConvs, m.conversations)
+					sort.Slice(sortedConvs, func(i, j int) bool {
+						return sortedConvs[i].CreatedAt.After(sortedConvs[j].CreatedAt)
+					})
+
+					// Use the sorted conversations for selection
+					m.conversation = &sortedConvs[m.selectedConv]
 					m.messages = m.conversation.Messages
 					m.mode = ModeNormal
 					m.updateViewport()
@@ -471,16 +555,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, executeCommand(cmdStr)
 				}
 			case tea.KeyRunes:
-				// Handle numeric selection
-				if num, err := strconv.Atoi(msg.String()); err == nil && num > 0 && num <= len(m.commands) {
-					cmdStr := m.commands[num-1][1]
-					m.mode = ModeNormal
-					return m, executeCommand(cmdStr)
+				switch msg.String() {
+				case "c":
+					if len(m.commands) > 0 {
+						cmdStr := m.commands[m.selectedCommand][1]
+						cmd, err := getClipboardCommand()
+						if err != nil {
+							m.err = err
+							return m, nil
+						}
+						cmd.Stdin = strings.NewReader(cmdStr)
+						m.mode = ModeNormal
+						return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+							if err != nil {
+								return nil
+							}
+							return nil
+						})
+					}
+				default:
+					// Handle numeric selection
+					if num, err := strconv.Atoi(msg.String()); err == nil && num > 0 && num <= len(m.commands) {
+						cmdStr := m.commands[num-1][1]
+						m.mode = ModeNormal
+						return m, executeCommand(cmdStr)
+					}
 				}
 			}
 
 		case ModeHelp:
 			m.mode = ModeNormal
+			m.updateViewport()
 			return m, nil
 		}
 
@@ -710,7 +815,7 @@ func (m model) View() string {
 	if m.viewport.YOffset > 0 {
 		finalView.WriteString(scrollIndicatorStyle.Render(upArrow))
 	} else if len(m.messages) > 1 { // Only show beginning text if there are messages beyond system prompt
-		finalView.WriteString(scrollIndicatorStyle.Render(beginningText))
+		finalView.WriteString(scrollIndicatorStyle.Render(endText))
 	} else {
 		finalView.WriteString("\n")
 	}
@@ -734,7 +839,7 @@ func (m model) View() string {
 	// If in command select mode, overlay the command selection
 	if m.mode == ModeCommandSelect {
 		var overlay strings.Builder
-		overlay.WriteString("Select a command to execute:\n\n")
+		overlay.WriteString("Select a command to execute or copy:\n\n")
 
 		for i, match := range m.commands {
 			cmd := match[1]
@@ -798,12 +903,12 @@ func (m model) statusBarView() string {
 	case ModeEditing:
 		return "Press ESC to exit, J/K to navigate messages, Enter to edit message, X to execute command, C to copy message"
 	case ModeHistory:
-		return "Press ESC to exit, Enter to select conversation"
+		return "Press ESC to exit, Enter to select conversation, Up/Down/MWheel to scroll"
 	case ModeCommandSelect:
 		if len(m.commands) == 1 {
-			return "Press Enter to execute command, ESC to cancel"
+			return "Press Enter to execute command, C to copy command, ESC to cancel"
 		}
-		return "Press ESC to exit, Enter/number to execute selected command"
+		return "Press ESC to exit, Enter/number to execute selected command, C to copy selected command"
 	case ModeHelp:
 		return "Press any key to exit help"
 	default:
@@ -837,6 +942,13 @@ func (m model) normalView() string {
 
 	for _, msg := range m.messages {
 		if msg.Role == "system" {
+			// Only show beginning text with timestamp for existing conversations
+			// (ones that have more than just the system message)
+			if len(m.messages) > 1 {
+				beginningText := fmt.Sprintf("- Beginning of conversation [%s] -",
+					m.conversation.CreatedAt.Format("Mon 02 Jan 2006 15:04"))
+				s.WriteString(scrollIndicatorStyle.Render(beginningText) + "\n\n")
+			}
 			continue
 		}
 		switch msg.Role {
@@ -896,7 +1008,14 @@ func (m model) editingView() string {
 func (m model) historyView() string {
 	s := "Conversation History (Press ESC to exit)\n\n"
 
-	for i, conv := range m.conversations {
+	// Sort conversations by date in descending order
+	sortedConvs := make([]storage.Conversation, len(m.conversations))
+	copy(sortedConvs, m.conversations)
+	sort.Slice(sortedConvs, func(i, j int) bool {
+		return sortedConvs[i].CreatedAt.After(sortedConvs[j].CreatedAt)
+	})
+
+	for i, conv := range sortedConvs {
 		line := fmt.Sprintf("[%s] %s", conv.CreatedAt.Format("2006-01-02 15:04:05"), conv.Summary)
 		if i == m.selectedConv {
 			s += selectedStyle.Render(line) + "\n"
@@ -905,6 +1024,8 @@ func (m model) historyView() string {
 		}
 	}
 
+	// Add extra newline at the end to ensure last entry is fully visible
+	s += "\n"
 	return s
 }
 
@@ -997,6 +1118,37 @@ func (m *model) ensureMessageVisible(index int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *model) ensureConversationVisible(index int) {
+	// Generate content and set it first
+	content := m.historyView()
+	m.viewport.SetContent(content)
+
+	// Find target conversation position
+	lines := strings.Split(content, "\n")
+	targetLine := index + 2 // Add 2 to account for header lines
+
+	// Calculate viewport constraints
+	totalLines := len(lines)
+	maxScroll := totalLines - m.viewport.Height + 1 // Add 1 to account for footer space
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+
+	// Calculate desired position - aim for middle of viewport
+	desiredOffset := targetLine - (m.viewport.Height / 2)
+
+	// Clamp to valid bounds
+	if desiredOffset < 0 {
+		desiredOffset = 0
+	}
+	if desiredOffset > maxScroll {
+		desiredOffset = maxScroll
+	}
+
+	// Update viewport position
+	m.viewport.YOffset = desiredOffset
+}
+
 func (m *model) updateViewport() {
 	// Store current scroll position
 	currentOffset := m.viewport.YOffset
@@ -1017,13 +1169,19 @@ func (m *model) updateViewport() {
 	case ModeCommandSelect:
 		content = m.commandSelectView()
 	case ModeHelp:
-		content = m.helpView()
+		content = helpMessage
 	default:
 		content = "Unknown mode"
 	}
 
 	// Set content
 	m.viewport.SetContent(content)
+
+	// For help mode, always scroll to top
+	if m.mode == ModeHelp {
+		m.viewport.GotoTop()
+		return
+	}
 
 	// Calculate maximum valid scroll position
 	maxOffset := m.viewport.TotalLineCount() - m.viewport.Height
