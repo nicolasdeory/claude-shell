@@ -4,7 +4,9 @@ Claude Shell or GPT-Term is a terminal-based chat interface for interacting with
 
 A video is worth more than a 1000 words:
 
-https://github.com/user-attachments/assets/645b6296-0969-47ee-938a-e88e9d207c96
+https://github.com/user-attachments/assets/10abd4e6-893f-4688-87ef-9eb551347b7d
+
+
 
 ## Features
 
@@ -22,6 +24,16 @@ https://github.com/user-attachments/assets/645b6296-0969-47ee-938a-e88e9d207c96
 brew tap nicolasdeory/gpt-term
 brew install gpt-term
 CLAUDE_API_KEY=your-api-key-here
+```
+
+Bind it to Ctrl+L in your favorite shell. 
+Example for ZSH:
+```
+      function run_gpt() {
+         /opt/homebrew/bin/gpt-term
+      }
+      zle -N run_gpt
+      bindkey '^L' run_gpt
 ```
 
 ## Development Installation
@@ -61,9 +73,10 @@ Start the application:
 ### Keyboard Shortcuts
 
 - **Navigation & Modes**
-  - `Ctrl+J/K`: Enter edit mode and navigate through messages with J/K
+  - `Ctrl+J/K`: Enter edit mode and navigate through messages with J/K (down/up respectively)
   - `Ctrl+N`: Create new chat
   - `Ctrl+R`: Browse conversation history
+  - `Ctrl+L`: Cycle through previous chats, latest one first.
   - `Ctrl+H`: Show help
   - `Ctrl+C`: Quit
   - `ESC`: Exit current mode
